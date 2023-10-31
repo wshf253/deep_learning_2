@@ -120,6 +120,84 @@ class TimeEmbedding:
         for t in range(T):
             layer = self.layers[t]
             layer.bacward(dout[:, t, :])
-            grad += layer.grads[0] # ???? don't understand
+            grad += layer.grads[0] 
+            # Since grads = [W], grad += grads will cause error so grads[0] will get W from [W]
+        
+        self.grads[0][...] = grad
+        return None
+
+
+class TimeAffine:
+    def __init__(self, W, b):
+        self.params = [W, b]
+        self.grads = [np.zeros_like(W), np.zeros_like(b)]
+        self.x = None
     
-    # TimeEmbedding, TimeAffine, TimeSoftmax don't understand
+    def forward(self, x):
+        N, T, D = x.shape # actually, x - (N, T, H) -> H is hidden size
+        W, b = self.params # W - (D(H), V)
+
+        rx = x.reshape(N*T, -1) # rx - (N*T, D)
+        out = np.dot(rx, W) + b
+        self.x = x
+        return out.reshape(N, T, -1) # (N, T, V) -> V is vocab_size
+    
+    def backward(self, dout):
+        x = self.x
+        N, T, D = x.shape
+        W, b = self.params
+
+        dout = dout.reshape(N*T, -1) # dout - (N, T, V) -> (N*T, V)
+        rx = x.reshape(N*T, -1)
+
+        db = np.sum(dout, axis=0)
+        dW = np.dot(rx.T, dout) # (D, N*T) dot (N*T, V) -> (D, V)
+        dx = np.dot(dout, W.T) # (N*T, V) dot (V, D) -> (N*T, D)
+        dx = dx.reshape(*x.shape) # (N, T, D)
+
+        self.grads[0][...] = dW
+        self.grads[1][...] = db
+
+        return dx
+
+
+class TimeSoftmaxWithLoss:
+    def __init__(self):
+        self.params, self.grads = [], []
+        self.cache = None
+        self.ignore_label = -1
+
+    def forward(self, xs, ts):
+        N, T, V  = xs.shape
+
+        if ts.ndim == 3:
+            # when ts is one hot label - (N, T, V)
+            ts = ts.argmax(axis=2) # ts - (N, T)
+
+        mask = (ts != self.ignore_label) # if same as ignore label - 0, if not same - 1
+
+        xs = xs.reshape(N*T, V)
+        ts = ts.reshape(N*T)
+        mask = mask.reshape(N*T)
+
+        ys = softmax(xs)
+        ls = np.log(ys[np.arange(N*T), ts])
+        ls *= mask # ignore_label에 해당하는 데이터는 손실을 0으로 설정 
+        loss = -np.sum(ls)
+        loss /= mask.sum()
+
+        self.cache = (ts, ys, mask, (N, T, V))
+        return loss
+    
+    def backward(self, dout=1):
+        ts, ys, mask, (N, T, V) = self.cache
+
+        dx = ys
+        dx[np.arange(N*T), ts] -= 1 # y-t
+        dx *= dout
+        dx /= mask.sum()
+        dx *= mask[:, np.newaxis] # ignore_label에 해당하는 데이터는 기울기를 0으로 설정
+
+        dx = dx.reshape(N, T, V)
+
+        return dx
