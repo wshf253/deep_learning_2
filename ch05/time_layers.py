@@ -26,8 +26,8 @@ class RNN:
         dx = np.matmul(dt, Wx.T)
         db = np.sum(dt, axis=0)
 
-        self.grads[0][...] = dWh
-        self.grads[1][...] = dWx
+        self.grads[0][...] = dWx
+        self.grads[1][...] = dWh
         self.grads[2][...] = db
 
         return dx, dh_prev
@@ -121,7 +121,7 @@ class TimeEmbedding:
             layer = self.layers[t]
             layer.bacward(dout[:, t, :])
             grad += layer.grads[0] 
-            # Since grads = [W], grad += grads will cause error so grads[0] will get W from [W]
+            # Since grads = [dW], grad += layer.grads will cause error, layer.grads[0] will get dW from [dW]
         
         self.grads[0][...] = grad
         return None
